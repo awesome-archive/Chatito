@@ -165,7 +165,7 @@ test('test npm command line generator for rasa directory examples', () => {
     expect(dataset).not.toBeNull();
     expect(dataset.rasa_nlu_data).not.toBeNull();
     expect(dataset.rasa_nlu_data.common_examples).not.toBeNull();
-    expect(dataset.rasa_nlu_data.common_examples.length).toEqual(2000);
+    expect(dataset.rasa_nlu_data.common_examples.length).toEqual(2030);
     expect(dataset.rasa_nlu_data.entity_synonyms).not.toBeNull();
     expect(dataset.rasa_nlu_data.entity_synonyms.length).toEqual(3);
     fs.unlinkSync(generatedTrainingFile);
@@ -253,4 +253,139 @@ test('test npm command line generator for snips all examples', () => {
     expect(testingDataset.bookRestaurantsAtDatetime.length).toEqual(100);
     fs.unlinkSync(generatedTestingFile);
     expect(fs.existsSync(generatedTestingFile)).toBeFalsy();
+});
+
+test('test npm command line generator for luis medium example', () => {
+    const d = __dirname;
+    const generatedTrainingFile = path.resolve(`${d}/../../examples/luis_dataset_training.json`);
+    const generatedTestingFile = path.resolve(`${d}/../../examples/luis_dataset_testing.json`);
+    const npmBin = path.resolve(`${d}/../bin.ts`);
+    const grammarFile = path.resolve(`${d}/../../examples/citySearch_medium.chatito`);
+    if (fs.existsSync(generatedTrainingFile)) {
+        fs.unlinkSync(generatedTrainingFile);
+    }
+    if (fs.existsSync(generatedTestingFile)) {
+        fs.unlinkSync(generatedTestingFile);
+    }
+    const child = cp.execSync(`node -r ts-node/register ${npmBin} ${grammarFile} --format=luis --outputPath=${d}/../../examples`);
+    expect(fs.existsSync(generatedTrainingFile)).toBeTruthy();
+    const dataset = JSON.parse(fs.readFileSync(generatedTrainingFile, 'utf8'));
+    expect(dataset).not.toBeNull();
+    expect(dataset.data).not.toBeNull();
+    expect(dataset.data.length).toEqual(1000);
+    fs.unlinkSync(generatedTrainingFile);
+    expect(fs.existsSync(generatedTrainingFile)).toBeFalsy();
+    expect(fs.existsSync(generatedTestingFile)).toBeTruthy();
+    const testingDataset = JSON.parse(fs.readFileSync(generatedTestingFile, 'utf8'));
+    expect(testingDataset).not.toBeNull();
+    expect(testingDataset.data).not.toBeNull();
+    expect(testingDataset.data.length).toEqual(100);
+    fs.unlinkSync(generatedTestingFile);
+    expect(fs.existsSync(generatedTestingFile)).toBeFalsy();
+});
+
+test('test npm command line generator for luis directory examples', () => {
+    const d = __dirname;
+    const generatedTrainingFile = path.resolve(`${d}/../../examples/luis_dataset_training.json`);
+    const generatedTestingFile = path.resolve(`${d}/../../examples/luis_dataset_testing.json`);
+    const npmBin = path.resolve(`${d}/../bin.ts`);
+    const grammarFile = path.resolve(`${d}/../../examples`);
+    if (fs.existsSync(generatedTrainingFile)) {
+        fs.unlinkSync(generatedTrainingFile);
+    }
+    if (fs.existsSync(generatedTestingFile)) {
+        fs.unlinkSync(generatedTestingFile);
+    }
+    const child = cp.execSync(`node -r ts-node/register ${npmBin} ${grammarFile} --format=luis --outputPath=${d}/../../examples`);
+    expect(fs.existsSync(generatedTrainingFile)).toBeTruthy();
+    const dataset = JSON.parse(fs.readFileSync(generatedTrainingFile, 'utf8'));
+    expect(dataset).not.toBeNull();
+    expect(dataset.data).not.toBeNull();
+    expect(dataset.data.length).toEqual(2030);
+    fs.unlinkSync(generatedTrainingFile);
+    expect(fs.existsSync(generatedTrainingFile)).toBeFalsy();
+    expect(fs.existsSync(generatedTestingFile)).toBeTruthy();
+    const testingDataset = JSON.parse(fs.readFileSync(generatedTestingFile, 'utf8'));
+    expect(testingDataset).not.toBeNull();
+    expect(testingDataset.data).not.toBeNull();
+    expect(testingDataset.data.length).toEqual(200);
+    fs.unlinkSync(generatedTestingFile);
+    expect(fs.existsSync(generatedTestingFile)).toBeFalsy();
+});
+
+test('test npm command line generator for imports example', () => {
+    const d = __dirname;
+    const generatedDir = path.resolve(`${d}/../../examples/importing/main`);
+    const generatedTrainingFile = path.resolve(generatedDir, 'default_dataset_training.json');
+    const npmBin = path.resolve(`${d}/../bin.ts`);
+    const grammarFile = path.resolve(`${d}/../../examples/importing/main.chatito`);
+    if (fs.existsSync(generatedTrainingFile)) {
+        fs.unlinkSync(generatedTrainingFile);
+    }
+    if (fs.existsSync(generatedDir)) {
+        fs.rmdirSync(generatedDir);
+    }
+    const child = cp.execSync(`node -r ts-node/register ${npmBin} ${grammarFile} --outputPath=${generatedDir}`);
+    expect(fs.existsSync(generatedDir)).toBeTruthy();
+    expect(fs.existsSync(generatedTrainingFile)).toBeTruthy();
+    const trainingDataset = JSON.parse(fs.readFileSync(generatedTrainingFile, 'utf8'));
+    expect(trainingDataset).not.toBeNull();
+    expect(trainingDataset.greet).not.toBeNull();
+    expect(trainingDataset.greet.length).toEqual(30);
+    fs.unlinkSync(generatedTrainingFile);
+    fs.rmdirSync(generatedDir);
+});
+
+test('test npm command line generator for flair medium example', () => {
+    const d = __dirname;
+    const generatedClassificationTrainingFile = path.resolve(`${d}/../../examples/classification_flair_dataset_training.txt`);
+    const generatedClassificationTestingFile = path.resolve(`${d}/../../examples/classification_flair_dataset_testing.txt`);
+    const generatedNERTrainingFile = path.resolve(`${d}/../../examples/ner_flair_dataset_training.txt`);
+    const generatedNERTestingFile = path.resolve(`${d}/../../examples/ner_flair_dataset_testing.txt`);
+    const npmBin = path.resolve(`${d}/../bin.ts`);
+    const grammarFile = path.resolve(`${d}/../../examples/citySearch_medium.chatito`);
+    if (fs.existsSync(generatedClassificationTrainingFile)) {
+        fs.unlinkSync(generatedClassificationTrainingFile);
+    }
+    if (fs.existsSync(generatedClassificationTestingFile)) {
+        fs.unlinkSync(generatedClassificationTestingFile);
+    }
+    if (fs.existsSync(generatedNERTrainingFile)) {
+        fs.unlinkSync(generatedNERTrainingFile);
+    }
+    if (fs.existsSync(generatedNERTestingFile)) {
+        fs.unlinkSync(generatedNERTestingFile);
+    }
+    const child = cp.execSync(`node -r ts-node/register ${npmBin} ${grammarFile} --format=flair --outputPath=${d}/../../examples`);
+    // generatedClassificationTrainingFile
+    expect(fs.existsSync(generatedClassificationTrainingFile)).toBeTruthy();
+    const dataset = fs.readFileSync(generatedClassificationTrainingFile, 'utf8');
+    expect(dataset).not.toBeNull();
+    expect(dataset.length).toBeGreaterThan(0);
+    fs.unlinkSync(generatedClassificationTrainingFile);
+    expect(fs.existsSync(generatedClassificationTrainingFile)).toBeFalsy();
+
+    // generatedClassificationTestingFile
+    expect(fs.existsSync(generatedClassificationTestingFile)).toBeTruthy();
+    const testingDataset = fs.readFileSync(generatedClassificationTestingFile, 'utf8');
+    expect(testingDataset).not.toBeNull();
+    expect(testingDataset.length).toBeGreaterThan(0);
+    fs.unlinkSync(generatedClassificationTestingFile);
+    expect(fs.existsSync(generatedClassificationTestingFile)).toBeFalsy();
+
+    // generatedNERTrainingFile
+    expect(fs.existsSync(generatedNERTrainingFile)).toBeTruthy();
+    const nerDataset = fs.readFileSync(generatedNERTrainingFile, 'utf8');
+    expect(nerDataset).not.toBeNull();
+    expect(nerDataset.length).toBeGreaterThan(0);
+    fs.unlinkSync(generatedNERTrainingFile);
+    expect(fs.existsSync(generatedNERTrainingFile)).toBeFalsy();
+
+    // generatedNERTestingFile
+    expect(fs.existsSync(generatedNERTestingFile)).toBeTruthy();
+    const testingNerDataset = fs.readFileSync(generatedNERTestingFile, 'utf8');
+    expect(testingNerDataset).not.toBeNull();
+    expect(testingNerDataset.length).toBeGreaterThan(0);
+    fs.unlinkSync(generatedNERTestingFile);
+    expect(fs.existsSync(generatedNERTestingFile)).toBeFalsy();
 });

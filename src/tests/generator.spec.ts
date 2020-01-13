@@ -1,8 +1,12 @@
+import * as flair from '../adapters/flair';
+import * as luis from '../adapters/luis';
 import * as rasa from '../adapters/rasa';
 import * as snips from '../adapters/snips';
 import * as web from '../adapters/web';
 import * as chatito from '../main';
-import { ISentenceTokens, IUtteranceWriter } from '../types';
+import { IChatitoCache, ISentenceTokens, IUtteranceWriter } from '../types';
+
+type ThenArg<T> = T extends Promise<infer U> ? U : T;
 
 describe('example with undefined slot', () => {
     const undefinedSlotExample = `
@@ -58,10 +62,21 @@ describe('example with undefined aliases and comment', () => {
 
 describe('example with max training defined higher than the maximum posibilities', () => {
     const maxErrorExample = `
-%[max_error]('training': '100')
+%[max]('training': '100')
     something
 `;
-    test('errors as expected', async () => {
+    let consoleOutput: string[] = [];
+    const mockedWarn = (output: string) => consoleOutput.push(output);
+    // tslint:disable: no-console
+    beforeEach(() => {
+        consoleOutput = [];
+        console.warn = mockedWarn;
+    });
+    const originalWarn = console.warn;
+    afterEach(() => (console.warn = originalWarn));
+    // tslint:enable: no-console
+
+    test('warns and produces 1 example', async () => {
         let error = null;
         const dataset: { [key: string]: ISentenceTokens[][] } = {};
         const writer: IUtteranceWriter = (u, k, n) => {
@@ -75,7 +90,11 @@ describe('example with max training defined higher than the maximum posibilities
         } catch (e) {
             error = e;
         }
-        expect(error.toString()).toEqual("Error: Can't generate 100 examples. Max possible examples is 1");
+        expect(error).toBeNull();
+        expect(dataset.max.length).toEqual(1);
+        expect(consoleOutput).toStrictEqual([
+            `Can't generate 100 examples for intent "max". Using the maximum possible combinations: 1. NOTE: Using the maximum leads to overfitting.`
+        ]);
     });
 });
 
@@ -155,11 +174,11 @@ describe('duplicate definition', () => {
 describe('missing intent definition', () => {
     const maxErrorExample = `
 @[aa]
-    a  
+    a
 @[bb]
     b
 `;
-    test('errors as expected', async () => {
+    test('just returns', async () => {
         let error = null;
         const dataset: { [key: string]: ISentenceTokens[][] } = {};
         const writer: IUtteranceWriter = (u, k, n) => {
@@ -173,14 +192,16 @@ describe('missing intent definition', () => {
         } catch (e) {
             error = e;
         }
-        expect(error.toString()).toEqual('Error: No actions found');
+        expect(error).toBe(null);
+        expect(dataset).toEqual({});
     });
 });
 
 describe('validation errors', () => {
     test('missing ast error', async () => {
-        const nullAST = await chatito.datasetFromAST(null, () => null);
-        const emptyArrAST = await chatito.datasetFromAST([], () => null);
+        const ch: any = chatito.datasetFromAST;
+        const nullAST = await ch(null, () => null);
+        const emptyArrAST = await ch([], () => null);
         expect(nullAST).toEqual(undefined);
         expect(emptyArrAST).toEqual(undefined);
     });
@@ -384,6 +405,20 @@ describe('example with slot variations', () => {
         expect(result.testing).not.toBeNull();
         expect(result.training.example_with_variations.length).toEqual(example1Sentences.length);
     });
+    test('correctly generates using luis adapter', async () => {
+        let error = null;
+        let result: ThenArg<ReturnType<typeof luis.adapter>> | null = null;
+        try {
+            result = await luis.adapter(example1, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(result).not.toBeNull();
+        expect(result!.training).not.toBeNull();
+        expect(result!.testing).not.toBeNull();
+        expect(result!.training!.data!.length).toEqual(example1Sentences.length);
+    });
 });
 
 describe('example with custom spaces and symbols with aliases and slots', () => {
@@ -439,14 +474,14 @@ describe('example with duplicate sentences', () => {
     ~[alias] ~[alias?] ~[alias?]
 
 %[anotherWeirdTest]
-    ~[alias?]
-    ~[alias?]
+    ~[alias]
+    ~[alias]
 
 ~[alias]
     alias
 `;
     const example3SentencesFirst = ['alias', 'alias alias', 'alias alias alias'];
-    const example3Sentences = ['alias', ''];
+    const example3Sentences = ['alias'];
     test('correctly generates the max number of non repeated sentences', async () => {
         let error = null;
         const dataset: { [key: string]: ISentenceTokens[][] } = {};
@@ -484,8 +519,8 @@ describe('rasa example with synonyms', () => {
 @[slot]
     ~[aliases]
     ~[aliases] not synonym
-    ~[valid alias]
-~[aliases]
+    ~[not valid alias]
+~[aliases]('synonym': 'true')
     alias
     alias2
     another alias
@@ -502,9 +537,9 @@ describe('rasa example with synonyms', () => {
         expect(dataset).not.toBeNull();
         expect(dataset.training).not.toBeUndefined();
         expect(dataset.testing).not.toBeUndefined();
-        expect(dataset.training.rasa_nlu_data.entity_synonyms.length).toBe(2);
-        expect(dataset.training.rasa_nlu_data.entity_synonyms.find(t => t.value === 'aliases').synonyms.length).toBe(3);
-        expect(dataset.training.rasa_nlu_data.entity_synonyms.find(t => t.value === 'valid alias').synonyms.length).toBe(0);
+        expect(dataset.training.rasa_nlu_data.entity_synonyms.length).toBe(1);
+        expect(dataset.training.rasa_nlu_data.entity_synonyms.find((t: any) => t.value === 'aliases').synonyms.length).toBe(3);
+        expect(dataset.training.rasa_nlu_data.entity_synonyms.find((t: any) => t.value === 'not valid alias')).toBeUndefined();
         expect(dataset.training.rasa_nlu_data.common_examples.length).toBe(7);
     });
 });
@@ -519,7 +554,7 @@ describe('example with synonyms and arguments', () => {
 @[slot]
     ~[aliases]
     ~[aliases] not synonym
-~[aliases]
+~[aliases]('synonym': 'true')
     alias
     alias2
     another alias
@@ -542,7 +577,7 @@ describe('example with synonyms and arguments', () => {
         expect(dataset.test).not.toBeUndefined();
         expect(dataset.test.length).toEqual(7);
         expect(dataset.test.filter(u => u.some(t => t.synonym === 'aliases')).length).toEqual(3);
-        expect(dataset.test.filter(u => u.some(t => t.args && t.args.entity === 'snips/datetime')).length).toEqual(1);
+        expect(dataset.test.filter(u => u.some(t => !!(t.args && t.args.entity === 'snips/datetime'))).length).toEqual(1);
     });
     test('correctly generates synonyms with rasa adapter', async () => {
         let error = null;
@@ -596,7 +631,7 @@ describe('example with alias referencing itself', () => {
         } catch (e) {
             error = e;
         }
-        expect(error.toString()).toEqual("Error: Invalid nesting of entity: 'aliases' inside entity 'aliases'. Infinite loop prevented.");
+        expect(error.toString()).toEqual('Error: You have a circular nesting: ~[aliases] -> ~[aliases]. Infinite loop prevented.');
     });
 });
 
@@ -619,8 +654,9 @@ describe('example with slots nest inside slots', () => {
         } catch (e) {
             error = e;
         }
-        expect(error.toString())
-            .toEqual("Error: Invalid nesting of slot: 'slot2' inside 'aliases'. An slot can't reference other slot.");
+        expect(error.toString()).toEqual(
+            "Error: You have nested slots: @[slot] -> ~[aliases] -> @[slot2]. A slot can't reference other slot."
+        );
     });
 });
 
@@ -647,5 +683,1065 @@ describe('example with slots nest inside alias', () => {
         expect(result.training).not.toBeNull();
         expect(result.testing).not.toBeNull();
         expect(result.training.test.length).toEqual(4);
+    });
+});
+
+describe('example with text similar to probability operator works as regular sentence text', () => {
+    const example = `
+%[greet]
+    *[treat as text] ~[phrase1]
+    *[20] ~[phrase2] ~[phrase2?]
+`;
+    test('correctly works', async () => {
+        let error = null;
+        let dataset: any;
+        try {
+            dataset = await web.adapter(example, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+    });
+});
+
+describe('example with wrong probability number', () => {
+    const badExample = `
+%[greet]('training': '1')
+    *[110%] ~[phrase1]
+    *[20%] ~[phrase2] ~[phrase2?]
+`;
+    test('correctly fails', async () => {
+        let error = null;
+        let dataset: any;
+        try {
+            dataset = await web.adapter(badExample, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).not.toBeNull();
+        expect(error.toString()).toEqual('Error: Probability "110%" must be greater than 0 up to 100. At IntentDefinition-greet');
+    });
+});
+
+describe('example with wrong probability definition', () => {
+    const badExample = `
+%[greet]('training': '1')
+    *[0] ~[phrase1]
+    *[0] ~[phrase2] ~[phrase2?]
+`;
+    test('correctly fails', async () => {
+        let error = null;
+        let dataset: any;
+        try {
+            dataset = await web.adapter(badExample, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error.toString()).toEqual('Error: Probability weight "0" must be greater than 0. At IntentDefinition-greet');
+    });
+});
+
+describe('example with more than 100% probability', () => {
+    const badExample = `
+%[greet]('training': '1')
+    *[60%] ~[phrase1]
+    *[70%] ~[phrase2] ~[phrase2?]
+`;
+    test('correctly fails', async () => {
+        let error = null;
+        let dataset: any;
+        try {
+            dataset = await web.adapter(badExample, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error.toString()).toEqual(
+            "Error: The sum of sentence probabilities (130) for an entity can't be higher than 100%. At IntentDefinition-greet"
+        );
+    });
+});
+
+describe('example wih sentences defining percentual probabilities', () => {
+    // NOTE: heree phrase1, can only generate 5 utterances
+    const probsExample = `
+%[greet]('training': '10', 'testing': '10')
+    *[60%] ~[phrase1]
+    *[20%] ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+~[phrase1]
+    p1-1
+    p1-2
+    p1-3
+    p1-4
+    p1-5
+
+~[phrase2]
+    p2-1
+    p2-2
+    p2-3
+    p2-4
+    p2-5
+
+~[phrase3]
+    p3-1
+    p3-2
+    p3-3
+    p3-4
+    p3-5
+
+~[phrase4]
+    p4-1
+    p4-2
+    p4-3
+    p4-4
+    p4-5
+`;
+    test('correctly works', async () => {
+        let error = null;
+        let r: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            r = await web.adapter(probsExample, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(r).not.toBeNull();
+        const result = r!;
+        expect(result.training).not.toBeNull();
+        expect(result.testing).not.toBeNull();
+        const all = [...result.training.greet, ...result.testing.greet];
+        let sentence1Count = 0;
+        let sentence2Count = 0;
+        let sentence3Count = 0;
+        let sentence4Count = 0;
+        all.forEach(u => {
+            const t = u[0];
+            if (t.value.startsWith('p1-')) {
+                sentence1Count++;
+            } else if (t.value.startsWith('p2-')) {
+                sentence2Count++;
+            } else if (t.value.startsWith('p3-')) {
+                sentence3Count++;
+            } else if (t.value.startsWith('p4-')) {
+                sentence4Count++;
+            }
+        });
+        expect(sentence1Count).toBeGreaterThanOrEqual(4);
+        expect(sentence2Count).toBeGreaterThanOrEqual(2);
+        expect(sentence3Count).toBeLessThan(6);
+        expect(sentence4Count).toBeGreaterThanOrEqual(1);
+    });
+});
+
+describe('example wih sentences defining weighted probabilities', () => {
+    // NOTE: heree phrase1, can only generate 5 utterances
+    const probsExample = `
+%[greet]('training': '50', 'testing': '50')
+    *[60] ~[phrase1] sentence final weight 300 (5*60) or 13.88888888888889%
+    *[20] ~[phrase2] ~[phrase2?] sentence final weight 600  (5*6*20) or 27.77777777777778%
+    ~[phrase3] ~[phrase3?] ~[phrase3?] sentence final weight 180 (5*6*6) pr 8.333333333333334%
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?] sentence final weight 1080 (5*6*6*6) or 50%
+
+~[phrase1]
+    p1-1
+    p1-2
+    p1-3
+    p1-4
+    p1-5
+
+~[phrase2]
+    p2-1
+    p2-2
+    p2-3
+    p2-4
+    p2-5
+
+~[phrase3]
+    p3-1
+    p3-2
+    p3-3
+    p3-4
+    p3-5
+
+~[phrase4]
+    p4-1
+    p4-2
+    p4-3
+    p4-4
+    p4-5
+`;
+    test('correctly works', async () => {
+        let error = null;
+        let r: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            r = await web.adapter(probsExample, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(r).not.toBeNull();
+        const result = r!;
+        expect(result.training).not.toBeNull();
+        expect(result.testing).not.toBeNull();
+        const all = [...result.training.greet, ...result.testing.greet];
+        let sentence1Count = 0;
+        let sentence2Count = 0;
+        let sentence3Count = 0;
+        let sentence4Count = 0;
+        all.forEach(u => {
+            const t = u[0];
+            if (t.value.startsWith('p1-')) {
+                sentence1Count++;
+            } else if (t.value.startsWith('p2-')) {
+                sentence2Count++;
+            } else if (t.value.startsWith('p3-')) {
+                sentence3Count++;
+            } else if (t.value.startsWith('p4-')) {
+                sentence4Count++;
+            }
+        });
+        expect(sentence1Count).toBeGreaterThanOrEqual(4);
+        expect(sentence2Count).toBeGreaterThanOrEqual(15);
+        expect(sentence3Count).toBeGreaterThanOrEqual(2);
+        expect(sentence4Count).toBeGreaterThanOrEqual(30);
+    });
+});
+
+describe('example wih sentences defining probabilities nested', () => {
+    // NOTE: heree phrase1, can only generate 5 utterances
+    const probsExample = `
+%[greet]('training': '10', 'testing': '10')
+    ~[p1]
+
+~[p1]
+    *[60%] ~[phrase1]
+    *[20%] ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+~[phrase1]
+    p1-1
+    p1-2
+    p1-3
+    p1-4
+    p1-5
+
+~[phrase2]
+    p2-1
+    p2-2
+    p2-3
+    p2-4
+    p2-5
+
+~[phrase3]
+    p3-1
+    p3-2
+    p3-3
+    p3-4
+    p3-5
+
+~[phrase4]
+    p4-1
+    p4-2
+    p4-3
+    p4-4
+    p4-5
+`;
+    test('correctly works', async () => {
+        let error = null;
+        let r: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            r = await web.adapter(probsExample, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(r).not.toBeNull();
+        const result = r!;
+        expect(result.training).not.toBeNull();
+        expect(result.testing).not.toBeNull();
+        const all = [...result.training.greet, ...result.testing.greet];
+        let sentence1Count = 0;
+        let sentence2Count = 0;
+        let sentence3Count = 0;
+        let sentence4Count = 0;
+        all.forEach(u => {
+            const t = u[0];
+            if (t.value.startsWith('p1-')) {
+                sentence1Count++;
+            } else if (t.value.startsWith('p2-')) {
+                sentence2Count++;
+            } else if (t.value.startsWith('p3-')) {
+                sentence3Count++;
+            } else if (t.value.startsWith('p4-')) {
+                sentence4Count++;
+            }
+        });
+        expect(sentence1Count).toEqual(5);
+        expect(sentence2Count).toBeGreaterThan(2);
+        expect(sentence3Count).toBeLessThan(5);
+        expect(sentence4Count).toBeGreaterThan(1);
+    });
+});
+
+describe('regular and even distribution with different probabilities', () => {
+    const probsExample = `
+%[default]
+    ~[phrase1]
+    ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+%[defaultWithPercProb]
+    *[36%] ~[phrase1]
+    *[25%] ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+%[defaultWithWeightProb]
+    *[36] ~[phrase1]
+    *[25] ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+%[even]('distribution': 'even')
+    ~[phrase1]
+    ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+%[evenWithPercProb]('distribution': 'even')
+    *[36%] ~[phrase1]
+    *[25%] ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+%[evenWithWeightProb]('distribution': 'even')
+    *[36] ~[phrase1]
+    *[25] ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+%[regular]('distribution': 'regular')
+    ~[phrase1]
+    ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+%[regularWithPercProb]('distribution': 'regular')
+    *[36%] ~[phrase1]
+    *[25%] ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+%[regularWithWeightProb]('distribution': 'regular')
+    *[36] ~[phrase1]
+    *[25] ~[phrase2] ~[phrase2?]
+    ~[phrase3] ~[phrase3?] ~[phrase3?]
+    ~[phrase4] ~[phrase4?] ~[phrase4?] ~[phrase4?]
+
+~[phrase1]
+    p1-1
+    p1-2
+    p1-3
+    p1-4
+    p1-5
+
+~[phrase2]
+    p2-1
+    p2-2
+    p2-3
+    p2-4
+    p2-5
+
+~[phrase3]
+    p3-1
+    p3-2
+    p3-3
+    p3-4
+    p3-5
+
+~[phrase4]
+    p4-1
+    p4-2
+    p4-3
+    p4-4
+    p4-5
+`;
+    const regularProbs = [5, 30, 180, 1080];
+    const regularPercProbs = [36, 25, 5.571428571428572, 33.42857142857142];
+    const regularWeightProbs = [5 * 36, 30 * 25, 180, 1080];
+    const evenProbs = [1, 1, 1, 1];
+    const evenPercProbs = [36, 25, 19.5, 19.5];
+    const evenWeightProbs = [36, 25, 1, 1];
+
+    describe('correctly calculates probabilties when default distribution is regular', () => {
+        const ast = chatito.astFromString(probsExample);
+        const defs = chatito.definitionsFromAST(ast);
+        expect(defs).not.toBeUndefined();
+
+        test('default distribution, no probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.default, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-default');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-default')!.probabilities).toStrictEqual(regularProbs);
+        });
+
+        test('default distribution, percentage probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.defaultWithPercProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-defaultWithPercProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-defaultWithPercProb')!.probabilities).toStrictEqual(regularPercProbs);
+        });
+
+        test('default distribution, weighted probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.defaultWithWeightProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-defaultWithWeightProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-defaultWithWeightProb')!.probabilities).toStrictEqual(regularWeightProbs);
+        });
+
+        test('even distribution, no probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.even, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-even');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-even')!.probabilities).toStrictEqual(evenProbs);
+        });
+
+        test('even distribution, percentage probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.evenWithPercProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-evenWithPercProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-evenWithPercProb')!.probabilities).toStrictEqual(evenPercProbs);
+        });
+
+        test('even distribution, weighted probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.evenWithWeightProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-evenWithWeightProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-evenWithWeightProb')!.probabilities).toStrictEqual(evenWeightProbs);
+        });
+
+        test('regular distribution, no probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.regular, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-regular');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-regular')!.probabilities).toStrictEqual(regularProbs);
+        });
+
+        test('regular distribution, percentage probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.regularWithPercProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-regularWithPercProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-regularWithPercProb')!.probabilities).toStrictEqual(regularPercProbs);
+        });
+
+        test('regular distribution, weighted probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.regularWithWeightProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-regularWithWeightProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-regularWithWeightProb')!.probabilities).toStrictEqual(regularWeightProbs);
+        });
+    });
+
+    describe('correctly calculates probabilties when default distribution is even', () => {
+        const ast = chatito.astFromString(probsExample);
+        const defs = chatito.definitionsFromAST(ast);
+        expect(defs).not.toBeUndefined();
+        beforeAll(() => {
+            chatito.config.defaultDistribution = 'even';
+        });
+        afterAll(() => {
+            chatito.config.defaultDistribution = 'regular';
+        });
+
+        test('default distribution, no probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.default, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-default');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-default')!.probabilities).toStrictEqual(evenProbs);
+        });
+
+        test('default distribution, percentage probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.defaultWithPercProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-defaultWithPercProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-defaultWithPercProb')!.probabilities).toStrictEqual(evenPercProbs);
+        });
+
+        test('default distribution, weighted probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.defaultWithWeightProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-defaultWithWeightProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-defaultWithWeightProb')!.probabilities).toStrictEqual(evenWeightProbs);
+        });
+
+        test('even distribution, no probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.even, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-even');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-even')!.probabilities).toStrictEqual(evenProbs);
+        });
+
+        test('even distribution, percentage probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.evenWithPercProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-evenWithPercProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-evenWithPercProb')!.probabilities).toStrictEqual(evenPercProbs);
+        });
+
+        test('even distribution, weighted probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.evenWithWeightProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-evenWithWeightProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-evenWithWeightProb')!.probabilities).toStrictEqual(evenWeightProbs);
+        });
+
+        test('regular distribution, no probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.regular, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-regular');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-regular')!.probabilities).toStrictEqual(regularProbs);
+        });
+
+        test('regular distribution, percentage probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.regularWithPercProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-regularWithPercProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-regularWithPercProb')!.probabilities).toStrictEqual(regularPercProbs);
+        });
+
+        test('regular distribution, weighted probabilities', () => {
+            const cache: IChatitoCache = new Map();
+            chatito.getVariationsFromEntity(defs!.Intent.regularWithWeightProb, defs!, false, cache);
+            const intentCache = cache.get('IntentDefinition-regularWithWeightProb');
+            expect(intentCache).not.toBeUndefined();
+            expect(cache.get('IntentDefinition-regularWithWeightProb')!.probabilities).toStrictEqual(regularWeightProbs);
+        });
+    });
+});
+
+describe('example with import of empty file', () => {
+    const ex = `
+import ./something.chatito
+%[greet]
+    ~[phrase1]
+    ~[phrase2] ~[phrase2?]
+`;
+    test('correctly fails', async () => {
+        let error = null;
+        let dataset: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            dataset = await web.adapter(ex, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).not.toBeNull();
+        expect(dataset).toBeNull();
+        expect(error.message).toContain('Failed importing');
+    });
+});
+export type IFileImporter = (
+    fromPath: string,
+    importFile: string
+) => {
+    filePath: string;
+    dsl: string;
+};
+
+describe('example with import with custom importer', () => {
+    const main = `
+import ./something.chatito
+%[greet]
+    ~[phrase1]
+    ~[phrase2]
+`;
+    const sec = `
+~[phrase1]
+    p1-1
+    p1-2
+
+~[phrase2]
+    p2-1
+    p2-2
+`;
+    const customImporter = () => ({
+        filePath: '',
+        dsl: sec
+    });
+    test('correctly works', async () => {
+        let error = null;
+        let dataset: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            dataset = await web.adapter(main, null, customImporter, '');
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(dataset).not.toBeNull();
+        expect(dataset!.training).not.toBeNull();
+        expect(dataset!.training.greet).not.toBeNull();
+        expect(dataset!.training.greet.length).toEqual(4);
+    });
+});
+
+describe('example that generates empty strings', () => {
+    const main = `
+%[test]('training': '6')
+    ~[hi?] ~[hi?] ~[hi?]
+`;
+    test('correctly fails', async () => {
+        let error = null;
+        let dataset: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            dataset = await web.adapter(main, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(dataset).toBeNull();
+        expect(error).not.toBeNull();
+        expect(error.message).toEqual(`Some sentence generated an empty string. Can't map empty to an intent.`);
+    });
+});
+
+describe('example that only has one sentence with float probs', () => {
+    const main = `
+%[findRestaurantsByCity]('training': '3')
+    *[99.99%] ~[restaurants]
+
+~[restaurants]
+    restaurants
+    places to eat
+    where to eat
+
+`;
+    test('correctly works', async () => {
+        let error = null;
+        let dataset: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            dataset = await web.adapter(main, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(dataset).not.toBeNull();
+        expect(dataset!.training).not.toBeNull();
+        expect(dataset!.training.findRestaurantsByCity).not.toBeNull();
+        expect(dataset!.training.findRestaurantsByCity.length).toEqual(3);
+    });
+});
+
+describe('example with invalid slot definition', () => {
+    const ex = `
+%[greet]
+    ~[phrase2] @[phrase2?]
+`;
+    test('correctly fails', async () => {
+        let error = null;
+        let dataset: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            dataset = await web.adapter(ex, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).not.toBeNull();
+        expect(dataset).toBeNull();
+        expect(error.message).toContain('Slot not defined: phrase2');
+    });
+});
+
+describe('example with two types of probability operator', () => {
+    const ex = `
+%[greet]('training': '1')
+    *[30%] ~[phrase2]
+    *[4] ~[phrase2] ~[phrase2]
+`;
+    test('correctly fails', async () => {
+        let error = null;
+        let dataset: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            dataset = await web.adapter(ex, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).not.toBeNull();
+        expect(dataset).toBeNull();
+        expect(error.message).toContain('All probability definitions for "IntentDefinition-greet" must be of the same type.');
+    });
+});
+
+describe('generating all the examples', () => {
+    const allExample = `
+%[intent]
+    ~[1-3]
+    ~[nested]
+
+~[1-3]
+    1
+    2
+    3
+
+@[4-5]
+    4
+    5
+
+~[nested]
+    @[4-5] ~[1-3?]
+`;
+
+    const expectedAllExamples = [
+        [{ value: '1', type: 'Text' }],
+        [{ value: '2', type: 'Text' }],
+        [{ value: '3', type: 'Text' }],
+        [{ value: '4', type: 'Slot', slot: '4-5' }],
+        [{ value: '5', type: 'Slot', slot: '4-5' }],
+        [{ value: '4', type: 'Slot', slot: '4-5' }, { type: 'Text', value: ' 1' }],
+        [{ value: '5', type: 'Slot', slot: '4-5' }, { type: 'Text', value: ' 1' }],
+        [{ value: '4', type: 'Slot', slot: '4-5' }, { type: 'Text', value: ' 2' }],
+        [{ value: '5', type: 'Slot', slot: '4-5' }, { type: 'Text', value: ' 2' }],
+        [{ value: '4', type: 'Slot', slot: '4-5' }, { type: 'Text', value: ' 3' }],
+        [{ value: '5', type: 'Slot', slot: '4-5' }, { type: 'Text', value: ' 3' }]
+    ];
+
+    test('correctly generates all examles for an intent', () => {
+        const ast = chatito.astFromString(allExample);
+        const defs = chatito.definitionsFromAST(ast);
+        expect(defs).not.toBeUndefined();
+
+        const allExamples = [...chatito.allExamplesGenerator(defs!, defs!.Intent.intent)];
+        expect(allExamples).toStrictEqual(expectedAllExamples);
+    });
+
+    test('correctly generates all examles for a slot', () => {
+        const ast = chatito.astFromString(allExample);
+        const defs = chatito.definitionsFromAST(ast);
+        expect(defs).not.toBeUndefined();
+
+        const allExamples = [...chatito.allExamplesGenerator(defs!, defs!.Slot['4-5'])];
+        expect(allExamples).toStrictEqual([[{ value: '4', type: 'Text' }], [{ value: '5', type: 'Text' }]]);
+    });
+
+    test('correctly picks examle by number', () => {
+        const ast = chatito.astFromString(allExample);
+        const defs = chatito.definitionsFromAST(ast);
+        expect(defs).not.toBeUndefined();
+
+        const sixthOfIntent = chatito.getExampleByNumber(defs!, defs!.Intent.intent, 5);
+        expect(sixthOfIntent).toStrictEqual([{ value: '4', type: 'Slot', slot: '4-5' }, { type: 'Text', value: ' 1' }]);
+
+        const thirdOfFirstAlias = chatito.getExampleByNumber(defs!, defs!.Alias['1-3'], 2);
+        expect(thirdOfFirstAlias).toStrictEqual([{ value: '3', type: 'Text' }]);
+
+        const secondOfFirstSlot = chatito.getExampleByNumber(defs!, defs!.Slot['4-5'], 1);
+        expect(secondOfFirstSlot).toStrictEqual([{ value: '5', type: 'Text' }]);
+
+        const fourthOfSecondAlias = chatito.getExampleByNumber(defs!, defs!.Alias.nested, 3);
+        expect(fourthOfSecondAlias).toStrictEqual([{ value: '5', type: 'Slot', slot: '4-5' }, { type: 'Text', value: ' 1' }]);
+
+        const exceedsLimit = chatito.getExampleByNumber(defs!, defs!.Alias.nested, 100);
+        expect(exceedsLimit).toStrictEqual([]);
+    });
+});
+
+describe('example when training + testing === max combinations', () => {
+    const ex = `
+%[greet]('training': '6', 'testing': '4')
+    ~[phrase1]
+    ~[phrase2]
+
+~[phrase1]
+    1
+    2
+    3
+    4
+    5
+
+~[phrase2]
+    6
+    7
+    8
+    9
+    10
+`;
+
+    test('generates requested amount of examples', async () => {
+        let error = null;
+        let dataset: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            dataset = await web.adapter(ex, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(dataset).not.toBeNull();
+        expect(dataset!.training).not.toBeNull();
+        expect(dataset!.training.greet).not.toBeNull();
+        expect(dataset!.training.greet.length).toEqual(6);
+        expect(dataset!.testing).not.toBeNull();
+        expect(dataset!.testing.greet).not.toBeNull();
+        expect(dataset!.testing.greet.length).toEqual(4);
+    });
+});
+
+describe('when duplicates does not allow to produce requested number of examples', () => {
+    const ex = `
+%[greet]('training': '9')
+    ~[phrase1]
+    ~[phrase2]
+
+~[phrase1]
+    1
+    2
+    3
+    4
+    5
+
+~[phrase2]
+    2
+    3
+    4
+    5
+    6
+`;
+    let consoleOutput: string[] = [];
+    const mockedWarn = (output: string) => consoleOutput.push(output);
+    beforeEach(() => {
+        consoleOutput = [];
+        // tslint:disable: no-console
+        console.warn = mockedWarn;
+    });
+    const originalWarn = console.warn;
+    afterEach(() => (console.warn = originalWarn));
+    // tslint:enable: no-console
+    test('warns and produces 6 examples', async () => {
+        let error = null;
+        let dataset: ThenArg<ReturnType<typeof web.adapter>> | null = null;
+        try {
+            dataset = await web.adapter(ex, null);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(dataset).not.toBeNull();
+        expect(dataset!.training).not.toBeNull();
+        expect(dataset!.training.greet).not.toBeNull();
+        expect(dataset!.training.greet.length).toEqual(6);
+        expect(consoleOutput).toStrictEqual([
+            'Too many duplicates while generating dataset! Looks like we have probably reached ' +
+                'the maximum ammount of possible unique generated examples. The generator has stopped ' +
+                'at 6 examples for intent greet.'
+        ]);
+    });
+});
+
+test('correctly generates all possible combinations using custom nested import', async () => {
+    let error = null;
+    const dataset: { [key: string]: ISentenceTokens[][] } = {};
+    const writer: IUtteranceWriter = (u, k, n) => {
+        if (!dataset[k]) {
+            dataset[k] = [];
+        }
+        dataset[k].push(u);
+    };
+    const example1 = `
+import ./imp1.chatito
+
+%[intent]
+    s1 ~[imp1?]
+    s2 ~[imp1?]
+`;
+    const imp1 = `
+import ./imp2.chatito
+
+~[imp1]
+    imp1-1 ~[imp2?]
+    imp1-2 ~[imp2?]
+`;
+    const imp2 = `
+~[imp2]
+    imp2-1
+    imp2-2
+`;
+    const importFile = (startPath: string, endPath: string) => {
+        const dsl = endPath === './imp1.chatito' ? imp1 : imp2;
+        return { filePath: '', dsl };
+    };
+    try {
+        await chatito.datasetFromString(example1, writer, importFile, '');
+    } catch (e) {
+        error = e;
+    }
+    expect(error).toBeNull();
+    expect(dataset).not.toBeNull();
+    expect(dataset.intent).not.toBeNull();
+    expect(dataset.intent.length).toEqual(14);
+});
+
+test('example importing malformed dsl', async () => {
+    let error = null;
+    const dataset: { [key: string]: ISentenceTokens[][] } = {};
+    const writer: IUtteranceWriter = (u, k, n) => {
+        if (!dataset[k]) {
+            dataset[k] = [];
+        }
+        dataset[k].push(u);
+    };
+    const example1 = `
+import ./imp1.chatito
+%[intent]
+    s1 ~[imp1?]
+    s2 ~[imp1?]
+`;
+    const imp1 = `
+bad[imp1]
+    imp1-1
+    imp1-2
+`;
+    const importFile = () => ({ filePath: '', dsl: imp1 });
+    try {
+        await chatito.datasetFromString(example1, writer, importFile, '');
+    } catch (e) {
+        error = e;
+    }
+    expect(error).not.toBeNull();
+    expect(error.toString()).toContain('Failed importing ./imp1.chatito.');
+});
+
+test('example with slot with alias and custom tagging', async () => {
+    let error = null;
+    const dataset: { [key: string]: ISentenceTokens[][] } = {};
+    const writer: IUtteranceWriter = (u, k, n) => {
+        if (!dataset[k]) {
+            dataset[k] = [];
+        }
+        dataset[k].push(u);
+    };
+    const example1 = `
+%[findByCityAndCategory]('training': '5')
+    ~[nearby] @[city]
+~[ny]('synonym': 'true')
+    ny
+    new york
+~[sf]('synonym': 'true')
+    sf
+    san francisco
+~[atl]('synonym': 'true')
+    atl
+    atlanta
+@[city]('entity': 'location')
+    ~[ny]
+    ~[sf]
+    ~[atl]
+~[nearby]
+    nearby
+`;
+    try {
+        await chatito.datasetFromString(example1, writer);
+    } catch (e) {
+        error = e;
+    }
+    expect(error).toBeNull();
+    expect(dataset).not.toBeNull();
+    expect(dataset.findByCityAndCategory).not.toBeNull();
+    expect(dataset.findByCityAndCategory.length).toEqual(5);
+});
+
+describe('autoAliases config', () => {
+    const example = `
+%[intent]
+    some ~[missing alias#variation?]
+`;
+    const generated = [
+        [
+            {
+                type: 'Text',
+                value: 'some'
+            }
+        ],
+        [
+            {
+                type: 'Text',
+                value: 'some missing alias#variation'
+            }
+        ]
+    ];
+
+    test('with default value', async () => {
+        let error = null;
+        const dataset: { [key: string]: ISentenceTokens[][] } = {};
+        const writer: IUtteranceWriter = (u, k, n) => {
+            if (!dataset[k]) {
+                dataset[k] = [];
+            }
+            dataset[k].push(u);
+        };
+        try {
+            await chatito.datasetFromString(example, writer);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeNull();
+        expect(dataset.intent).toStrictEqual(generated);
+    });
+
+    test('with warn option', async () => {
+        let error = null;
+        const dataset: { [key: string]: ISentenceTokens[][] } = {};
+        const writer: IUtteranceWriter = (u, k, n) => {
+            if (!dataset[k]) {
+                dataset[k] = [];
+            }
+            dataset[k].push(u);
+        };
+        const consoleOutput: string[] = [];
+        const mockedWarn = (output: string) => consoleOutput.push(output);
+        // tslint:disable: no-console
+        const originalWarn = console.warn;
+        try {
+            console.warn = mockedWarn;
+            chatito.config.autoAliases = 'warn';
+            await chatito.datasetFromString(example, writer);
+        } catch (e) {
+            error = e;
+        } finally {
+            console.warn = originalWarn;
+            chatito.config.autoAliases = 'allow';
+        }
+        // tslint:enable: no-console
+        expect(error).toBeNull();
+        expect(dataset.intent).toStrictEqual(generated);
+        expect(consoleOutput).toStrictEqual(["WARNING! Auto alias creation: 'missing alias#variation'"]);
+    });
+
+    test('with restrict option', async () => {
+        let error = null;
+        try {
+            chatito.config.autoAliases = 'restrict';
+            await chatito.datasetFromString(example, () => null);
+        } catch (e) {
+            error = e;
+        } finally {
+            chatito.config.autoAliases = 'allow';
+        }
+        expect(error.toString()).toEqual('Error: Alias not defined: missing alias#variation');
     });
 });

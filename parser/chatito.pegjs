@@ -1,8 +1,10 @@
 { var STEP = 4; var level = 0; var entry = false; }
 
-Start = (TopLevelStatement/CommentLine)+
+Start = (ImportFile/TopLevelStatement/CommentLine)+
 TopLevelStatement = od:(IntentDefinition/SlotDefinition/AliasDefinition) { return od; }
 
+// ============= Probability operator =============
+ProbabilityOperatorDefinition = "*[" probability:Number percent:"%"? "]" { return `${probability}${percent || ''}`; }
 // ============= Entities =============
 EntityOpt = "?"
 EntityBody = "[" value:EntityKeywordLiteral "]" { return value }
@@ -17,7 +19,8 @@ AnyTextWithSlotAndAlias = v:(t:((!"\r\n")(!"\n")(!"~[")(!"@[") .) { return t.joi
 IntentAndSlotKeywordLiterals = value:AnyTextWithSlotAndAlias { return { value: value, type: "Text" }}
 IntentAndSlotValidInner = (OptionalSlot/OptionalAlias/IntentAndSlotKeywordLiterals)+
 IntentAndSlotInnerStatements =  IntentAndSlotInnerStatement+
-IntentAndSlotInnerStatement =  Samedent s:IntentAndSlotValidInner EOS { return s; }
+IntentAndSlotInnerStatement =  Samedent p:ProbabilityOperatorDefinition? s:IntentAndSlotValidInner EOS
+     { return { sentence: s, probability: p }; }
 IntentDefinition = EOL? o:EntityIntentDefinition EOL
     Indent s:IntentAndSlotInnerStatements Dedent
     { return { type: o.type, key: o.value, args: o.args, location: o.location, inner: s } }
@@ -35,18 +38,19 @@ OptionalSlot = "@" op:SlotOptionalBody
 AnyTextWithAlias = v:(t:((!"\r\n")(!"\n")(!"~[") .) { return t.join(""); })+ { return v.join(""); }
 SlotKeywordLiterals = value:AnyTextWithAlias { return { value: value, type: "Text" }}
 SlotValidInner = (OptionalAlias/SlotKeywordLiterals)+
-SlotInnerStatement =  Samedent s:SlotValidInner EOS { return s; }
+SlotInnerStatement =  Samedent p:ProbabilityOperatorDefinition? s:SlotValidInner EOS { return { sentence: s, probability: p }; }
 SlotInnerStatements =  SlotInnerStatement+
 SlotDefinition = EOL? o:EntitySlotDefinition EOL
     Indent s:SlotInnerStatements Dedent
     { return { type: o.type, key: o.value, args: o.args, location: o.location, inner: s, variation: o.variation } }
 
 // Alias
-EntityAliasDefinition = "~" value:EntityBody { return { value: value, type: "AliasDefinition", location: location() } }
+EntityAliasDefinition = "~" value:EntityBody args:EntityArguments?
+    { return { value: value, type: "AliasDefinition", location: location(), args: args } }
 OptionalAlias = "~" op:EntityOptionalBody { return { value: op.value, type: "Alias", opt: op.opt } }
 AliasDefinition = EOL? o:EntityAliasDefinition EOL
     Indent s:IntentAndSlotInnerStatements Dedent
-    { return { type: o.type, key: o.value, location: o.location, inner: s } }
+    { return { type: o.type, key: o.value, location: o.location, inner: s, args: o.args } }
 
 // ============= Identation =============
 Samedent "correct indentation" = s:" "* &{ return s.length === level * STEP; }
@@ -55,13 +59,26 @@ Dedent = &{ level--; return true; }
 
 // ============= Primitives =============
 AnyTextWithoutEOL = v:(t:((!"\r\n")(!"\n") .) { return t.join(""); })+ { return v.join(""); }
-CommentLine = EOL? "//" c:AnyTextWithoutEOL EOS? { return { type: "Comment" , value: c.trim() }; }
+DoubleSlashCommentLine = EOL? "//" c:AnyTextWithoutEOL EOS? { return { type: "Comment" , value: c.trim() }; }
+HashCommentLine = EOL? "#" c:AnyTextWithoutEOL EOS? { return { type: "Comment" , value: c.trim() }; }
+CommentLine = (DoubleSlashCommentLine/HashCommentLine)
+
+ImportFile = EOL? "import " s:AnyTextWithoutEOL EOS? { return { type: "ImportFile", value: s.trim() }; }
 
 // KeywordLiteral "word" = v:([a-zA-Z0-9_ \:\+]+) { return v.join(""); }
+BasicKeywordLiteral "entity name" = v:(t:((!"\r\n")(!"\n")(!"]") .) { return t.join(""); })+ { return v.join(""); }
 EntityKeywordLiteral "entity name" = v:(t:((!"\r\n")(!"\n")(!"]")(!"?") .) { return t.join(""); })+ { return v.join(""); }
 SlotKeywordLiteral "entity name" = v:(t:((!"\r\n")(!"\n")(!"#")(!"]")(!"?") .) { return t.join(""); })+ { return v.join(""); }
 
-Integer "integer" = [0-9]+ { return parseInt(text(), 10); }
+// Number
+Number "number" = int frac? { return parseFloat(text()); }
+DecimalPoint = "."
+Digit1_9 = [1-9]
+Digit0_9  = [0-9]
+frac = DecimalPoint Digit0_9+
+int = zero / (Digit1_9 Digit0_9*)
+zero = "0"
+
 EOS "end of sentence" = EOL / EOF
 EOL "end of line "= (EOLNonWindows/EOLWindows)+
 EOLNonWindows "non windows end of line" = "\n"

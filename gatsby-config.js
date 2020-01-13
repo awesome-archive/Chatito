@@ -5,13 +5,19 @@ module.exports = {
     },
     plugins: [
         {
+            resolve: `gatsby-plugin-typescript`,
+            options: {},
+        },
+        {
             resolve: 'gatsby-plugin-page-creator',
             options: {
                 path: `${__dirname}/web/pages`
             }
         },
         'gatsby-plugin-react-helmet',
-        'gatsby-plugin-typescript',
-        'gatsby-plugin-styled-components'
-    ]
+        {
+            resolve: 'gatsby-plugin-styled-components',
+            options: {},
+        },
+    ],
 };

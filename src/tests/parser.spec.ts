@@ -297,6 +297,30 @@ describe('Example with comments spec', () => {
         expect(error).toBeNull();
         expect(JSON.stringify(result, null, 2)).toMatchSnapshot();
     });
+
+    const exampleWithCorrectHashComments = `
+#this is a comment
+%[ask_for_delivery]
+    my parcel should be delivered in @[delivery_time#time_in_hours]
+`;
+    test('CORRECT parser output for exampleWithCorrectHashComments', () => {
+        let error: any = null;
+        let result = null;
+        try {
+            result = chatitoParser.parse(exampleWithCorrectHashComments);
+        } catch (e) {
+            error = { error: e };
+            if (e.location) {
+                error.location = {
+                    line: e.location.start.line,
+                    column: e.location.start.column
+                };
+            }
+        }
+        expect(error).toBeNull();
+        expect(JSON.stringify(result, null, 2)).toMatchSnapshot();
+    });
+
     const exampleWithWrongComments = `
     // this is a comment
 %[ask_for_delivery]
@@ -324,6 +348,106 @@ describe('Example with comments spec', () => {
     });
 });
 
+describe('Example with probability weighted opreator', () => {
+    const slotExamplesWithWeirdKeywords = `
+%[greet]('training': '10', 'testing': '10')
+    *[50] ~[phrase1]
+    *[30] ~[phrase2] ~[phrase3?]
+    ~[another phrase] ~[something] ~[something else?]
+`;
+    test('CORRECT parser output', () => {
+        let error: any = null;
+        let result = null;
+        try {
+            result = chatitoParser.parse(slotExamplesWithWeirdKeywords);
+        } catch (e) {
+            error = { error: e };
+            if (e.location) {
+                error.location = {
+                    line: e.location.start.line,
+                    column: e.location.start.column
+                };
+            }
+        }
+        expect(error).toBeNull();
+        expect(JSON.stringify(result, null, 2)).toMatchSnapshot();
+    });
+});
+
+describe('Example with probability percentual opreator', () => {
+    const slotExamplesWithWeirdKeywords = `
+%[greet]('training': '10', 'testing': '10')
+    *[50%] ~[phrase1]
+    *[30%] ~[phrase2] ~[phrase3?]
+    ~[another phrase] ~[something] ~[something else?]
+`;
+    test('CORRECT parser output', () => {
+        let error: any = null;
+        let result = null;
+        try {
+            result = chatitoParser.parse(slotExamplesWithWeirdKeywords);
+        } catch (e) {
+            error = { error: e };
+            if (e.location) {
+                error.location = {
+                    line: e.location.start.line,
+                    column: e.location.start.column
+                };
+            }
+        }
+        expect(error).toBeNull();
+        expect(JSON.stringify(result, null, 2)).toMatchSnapshot();
+    });
+});
+
+describe('Example with probability opreator but non int or float value parses as text', () => {
+    const slotExamplesWithWeirdKeywords = `
+%[greet]('training': '10', 'testing': '10')
+    *[5c0] ~[phrase1]
+`;
+    test('CORRECT parser output', () => {
+        let error: any = null;
+        let result = null;
+        try {
+            result = chatitoParser.parse(slotExamplesWithWeirdKeywords);
+        } catch (e) {
+            error = { error: e };
+            if (e.location) {
+                error.location = {
+                    line: e.location.start.line,
+                    column: e.location.start.column
+                };
+            }
+        }
+        expect(error).toBeNull();
+        expect(JSON.stringify(result, null, 2)).toMatchSnapshot();
+    });
+});
+
+describe('Example with probability opreator but no after space parses correctly', () => {
+    const slotExamplesWithWeirdKeywords = `
+%[greet]('training': '10', 'testing': '10')
+    *[50]~[phrase1]
+`;
+    test('CORRECT parser output', () => {
+        let error: any = null;
+        let result = null;
+        try {
+            result = chatitoParser.parse(slotExamplesWithWeirdKeywords);
+        } catch (e) {
+            error = { error: e };
+            if (e.location) {
+                error.location = {
+                    line: e.location.start.line,
+                    column: e.location.start.column
+                };
+            }
+        }
+        expect(error).toBeNull();
+        expect(JSON.stringify(result, null, 2)).toMatchSnapshot();
+    });
+});
+
 describe('Example with international language characters', () => {
     const slotExamplesWithWeirdKeywords = `
 %[中文]
@@ -331,6 +455,63 @@ describe('Example with international language characters', () => {
 
 @[中文]
     中文
+`;
+    test('CORRECT parser output', () => {
+        let error: any = null;
+        let result = null;
+        try {
+            result = chatitoParser.parse(slotExamplesWithWeirdKeywords);
+        } catch (e) {
+            error = { error: e };
+            if (e.location) {
+                error.location = {
+                    line: e.location.start.line,
+                    column: e.location.start.column
+                };
+            }
+        }
+        expect(error).toBeNull();
+        expect(JSON.stringify(result, null, 2)).toMatchSnapshot();
+    });
+});
+
+describe('Example with import statement at start', () => {
+    const slotExamplesWithWeirdKeywords = `
+
+import ../some/file.chatito
+import ../some/file.chatito
+
+%[greet]
+    hey yo!
+`;
+    test('CORRECT parser output', () => {
+        let error: any = null;
+        let result = null;
+        try {
+            result = chatitoParser.parse(slotExamplesWithWeirdKeywords);
+        } catch (e) {
+            error = { error: e };
+            if (e.location) {
+                error.location = {
+                    line: e.location.start.line,
+                    column: e.location.start.column
+                };
+            }
+        }
+        expect(error).toBeNull();
+        expect(JSON.stringify(result, null, 2)).toMatchSnapshot();
+    });
+});
+
+describe('Example with alias arguments', () => {
+    const slotExamplesWithWeirdKeywords = `
+%[g]('training': '2', 'testing': '1')
+    ~[g]
+
+~[g]('arg': 'val')
+    g1
+    g2
+    g3
 `;
     test('CORRECT parser output', () => {
         let error: any = null;

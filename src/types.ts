@@ -19,13 +19,21 @@ export interface ISentenceTokens {
     args?: { [key: string]: string };
 }
 
+export interface ISingleSentence {
+    sentence: ISentenceTokens[];
+    probability: null | string;
+    cardinality?: number;
+}
+
 export interface IChatitoEntityAST {
-    type: 'IntentDefinition' | 'AliasDefinition' | 'SlotDefinition' | 'Comment';
+    type: 'IntentDefinition' | 'AliasDefinition' | 'SlotDefinition' | 'Comment' | 'ImportFile';
     key: string;
-    inner: ISentenceTokens[][];
+    inner: ISingleSentence[];
+    value?: string;
     location?: IASTLocation;
     variation?: string | null;
     args?: { [key: string]: string };
+    cardinality?: number;
 }
 
 export interface IChatitoParser {
@@ -41,11 +49,16 @@ export interface IEntities {
 }
 
 export interface IStatCache {
-    optional: boolean;
-    optionalCounts: number;
-    totalCounts: number[];
+    // optional: boolean;
+    // optionalCounts: number;
+    // totalCounts: number[];
     counts: IChatitoCache[];
+    // sumOfTotalMax: number;
     maxCounts: number[];
+    probabilities: number[]; // value defined at probability operator
+    // realProbabilities: number[]; // actual probability calculateed from the max possible utterances
+    // utterancesToProvide: number[]; // the actual number of utterances each sentence will provide
+    // resetedCounts: boolean;
 }
 export type IChatitoCache = Map<string, IStatCache>;
 export type IUtteranceWriter = (utterance: ISentenceTokens[], intentKey: string, isTrainingExample: boolean) => void;
